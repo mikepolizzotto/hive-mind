@@ -1,0 +1,21 @@
+# Isolated Machine (Limited Access)
+#
+# This machine owns one domain repo and reads the shared identity
+# layer. It does NOT have access to other domain repos (e.g., work
+# data stays off this machine). Customize for your setup.
+
+## Shared Memory
+
+This machine has access to the following memory repos:
+- **homelab-memory**: ~/repos/homelab-memory/ (read-write, source of truth)
+- **shared-identity**: ~/repos/shared-identity/ (read-write)
+
+### Rules
+- On session start, pull shared-identity before reading
+- Domain-specific memories → homelab-memory
+- Universal memories or personal project notes → shared-identity
+- After writing to a shared repo:
+  ```bash
+  cd ~/repos/<repo> && git add -A && git commit -m "[homelab] description" && git push
+  ```
+- This machine has NO access to work-memory. Do not reference or attempt to read work-specific context.

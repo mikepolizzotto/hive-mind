@@ -1,0 +1,20 @@
+# Primary Machine (Source of Truth for Work Domain)
+#
+# This machine owns the work-memory repo and has read-write access
+# to shared-identity. Customize repo paths and names for your setup.
+
+## Shared Memory
+
+This machine has access to the following memory repos:
+- **work-memory**: ~/repos/work-memory/ (read-write, source of truth)
+- **shared-identity**: ~/repos/shared-identity/ (read-write)
+
+### Rules
+- On session start, pull shared repos before reading
+- Work-specific memories → work-memory
+- Universal memories (user prefs, collaboration style, feedback that applies everywhere) → shared-identity
+- After writing to a shared repo:
+  ```bash
+  cd ~/repos/<repo> && git add -A && git commit -m "[primary] description" && git push
+  ```
+- When a topic might have context in another repo, read that repo's MEMORY.md index first

@@ -1,0 +1,22 @@
+# Bridge Machine (Sees Everything)
+#
+# This machine has access to all repos. It can read everything
+# and write to repos it owns. Customize repo paths, names, and
+# read/write permissions for your setup.
+
+## Shared Memory
+
+This machine has access to the following memory repos:
+- **work-memory**: ~/repos/work-memory/ (read-write)
+- **shared-identity**: ~/repos/shared-identity/ (read-write)
+- **homelab-memory**: ~/repos/homelab-memory/ (read-only — never commit/push, write via homelab server)
+
+### Rules
+- On session start, pull all repos before reading
+- To find context, read the relevant repo's MEMORY.md index first, then specific files
+- Cross-reference multiple repos when a topic spans domains
+- After writing to a shared repo:
+  ```bash
+  cd ~/repos/<repo> && git add -A && git commit -m "[bridge] description" && git push
+  ```
+- Local memory holds ONLY machine-specific notes (hostname, local paths, SSH keys) and pointers to shared repos

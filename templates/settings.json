@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -C ~/repos/shared-identity pull --ff-only 2>/dev/null; git -C ~/repos/work-memory pull --ff-only 2>/dev/null; git -C ~/repos/homelab-memory pull --ff-only 2>/dev/null; true"
+          }
+        ]
+      }
+    ]
+  }
+}
