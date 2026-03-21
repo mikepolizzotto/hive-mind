@@ -11,8 +11,11 @@ This machine has access to the following memory repos:
 - **shared-identity**: ~/repos/shared-identity/ (read-write)
 - **homelab-memory**: ~/repos/homelab-memory/ (read-only — never commit/push, write via homelab server)
 
+### When to check shared repos
+If the user asks about a specific project, tool, repo, system, or name that you don't immediately recognize — check the MEMORY.md index in each shared repo before saying "I don't know." If any index references the topic, read the linked file before responding.
+Do NOT do this for general knowledge questions. Only check repos when the question is about something specific to the user's projects or infrastructure.
+
 ### Rules
-- On session start, pull all repos before reading
 - To find context, read the relevant repo's MEMORY.md index first, then specific files
 - Cross-reference multiple repos when a topic spans domains
 - After writing to a shared repo:

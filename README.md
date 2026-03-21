@@ -233,6 +233,7 @@ This framework is designed for one person across multiple machines. For team use
 
 - **No mid-session sync.** If you're on Machine A and Machine B writes a memory simultaneously, Machine A won't see it until the next session. This is fine — you're not on two machines in the same conversation.
 - **Claude must follow CLAUDE.md instructions.** The commit-and-push behavior isn't enforced by tooling — it's instructed via CLAUDE.md. New sessions don't carry behavioral patterns from previous ones; they just read the instructions. If Claude forgets to push, the other machines get stale data.
+- **Claude won't proactively check repos unless told to.** Without explicit instructions, Claude will say "I don't know" instead of checking shared repos. The templates include a "When to check shared repos" section that tells Claude to check MEMORY.md indexes when asked about specific projects or names it doesn't recognize. This is scoped to avoid checking repos for general knowledge questions.
 - **Hook format may change.** Claude Code hooks are relatively new. The schema may evolve. Check the [hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) if you hit errors.
 - **Git pull on every session start.** The hook fires on the first `Read` call. If you're offline, the pull silently fails and Claude works with whatever was last pulled. No data loss, just potentially stale data.
 
