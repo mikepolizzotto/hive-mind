@@ -28,6 +28,8 @@ Instead of one giant synced folder, split memory into domains. Each domain gets 
 
 You might only need two repos, or you might need four. The number depends on your setup. The important thing is that each repo has a clear boundary.
 
+**A note on naming.** The repo names above (`work-memory`, `shared-identity`, `homelab-memory`) are descriptive placeholders — use whatever tells you what's inside at a glance. Many users pick a theme so the names are memorable: brain anatomy, geography, mythology, whatever. The framework doesn't care about the names; your CLAUDE.md is what maps each repo to its purpose.
+
 ### The Shared Identity Layer
 
 One repo must be readable by **every** machine. This is your shared identity layer — it holds memories about *you*, not about any specific environment:
@@ -83,7 +85,9 @@ See [feedback_design.md](feedback_design.md) for design standards.
 See [feedback_code_style.md](feedback_code_style.md) for code style preferences.
 ```
 
-Individual memories go in separate `.md` files with frontmatter:
+Individual memories go in separate `.md` files with frontmatter. Claude Code's built-in [auto-memory](https://docs.anthropic.com/en/docs/claude-code/memory) uses four memory types — `user`, `feedback`, `project`, `reference` — and sets expectations about how each type should be structured. If you're using Claude's native memory system, match its conventions so future sessions parse your memories correctly.
+
+**`user` — who you are and how you work:**
 
 ```markdown
 ---
@@ -94,6 +98,48 @@ type: user
 
 I'm a senior engineer who uses AI as a collaborator, not a task executor.
 Challenge my decisions. Keep responses concise. No trailing summaries.
+```
+
+**`feedback` — corrections and validated approaches. Include `Why:` and `How to apply:` so future sessions can judge edge cases:**
+
+```markdown
+---
+name: No trailing summaries
+description: Terse responses without recap of what just happened
+type: feedback
+---
+
+Don't summarize what you just did at the end of a response. I read the diff.
+
+**Why:** Trailing summaries inflate responses without adding information.
+**How to apply:** Skip end-of-turn recaps. State results and decisions directly, then stop.
+```
+
+**`project` — facts and decisions about ongoing work. Also uses `Why:` / `How to apply:`:**
+
+```markdown
+---
+name: Homelab freeze window
+description: No non-critical changes during the freeze
+type: project
+---
+
+Homelab changes are frozen until 2026-05-15.
+
+**Why:** Mid-migration to new hypervisor; don't want churn.
+**How to apply:** Flag any proposed homelab work after 2026-05-15 — before then, only critical fixes.
+```
+
+**`reference` — pointers to external systems:**
+
+```markdown
+---
+name: Bug tracker
+description: Where bugs live outside this repo
+type: reference
+---
+
+Bugs are tracked in Linear project "INFRA". Check there for context on ticket IDs.
 ```
 
 ### 2. Clone Repos on Each Machine
@@ -225,9 +271,53 @@ Both machines get read-write on both repos. No access restrictions needed.
 
 Add repos per domain and restrict access. A machine that doesn't need work credentials shouldn't have a clone of the repo that contains them.
 
+### Headless Machines (No Interactive Sessions)
+
+The auto-pull hook in `settings.json` fires on Claude Code's first `Read` call — which means it only fires during **interactive** sessions. If a machine only ever runs automated jobs (a homelab server, a CI runner, a scheduled scraper) and you never open a Claude Code session on it directly, the hook never runs and the local clone silently goes stale. In practice this can drift by days or weeks before anyone notices.
+
+**Fix:** piggyback `git pull --ff-only` onto an existing scheduled job on that machine (cron, launchd, systemd timer). Don't create a new dedicated sync-only job — just add the pull at the top of a job that already runs on the cadence you need.
+
+`templates/headless-sync.sh` is a drop-in helper:
+
+```bash
+# In a launchd plist, cron entry, or systemd unit that already runs daily:
+~/repos/claude-hive-mind/templates/headless-sync.sh
+# ...then the rest of your scheduled job
+```
+
+The helper is intentionally non-fatal: missing repos, broken network, or stale locks won't block the parent job. See `templates/CLAUDE.md.headless` for a full CLAUDE.md template designed for this machine role.
+
 ### Team Use
 
 This framework is designed for one person across multiple machines. For team use, you'd want shared repos with branch-based writes or PR-based reviews. That's a different problem.
+
+## Using Claude's Native Memory Directory as the Repo
+
+Claude Code has a built-in auto-memory system that writes to a directory keyed off your working directory — typically something like `~/.claude/projects/<path-encoded-cwd>/memory/`. By default, this directory is just a local folder and nothing syncs it anywhere.
+
+**The trick:** clone your memory repo *as* that native directory instead of into `~/repos/`. Claude's built-in memory tooling then writes straight into your git repo with no translation layer.
+
+The native path is your working directory with slashes replaced by dashes, under `~/.claude/projects/`. For example, a working directory of `/Users/alice` becomes `~/.claude/projects/-Users-alice/memory/`. List `~/.claude/projects/` to see which ones Claude has already created for you:
+
+```bash
+ls ~/.claude/projects/
+# find the entry that matches your main working directory, then:
+
+cd ~/.claude/projects/<your-encoded-cwd>/
+# Back up anything already in memory/ before this next step — rm is destructive:
+mv memory memory.bak 2>/dev/null
+gh repo clone yourname/work-memory memory
+```
+
+After that, anything Claude writes via the auto-memory system is a regular file in a regular git repo, ready to commit and push. If you had memories in `memory.bak`, move them into the new clone and commit.
+
+**Tradeoffs:**
+- **Pro:** zero indirection. Claude's native memory UI, the `MEMORY.md` index, and your git repo are all the same thing.
+- **Pro:** works automatically with future changes to Claude's built-in memory behavior — no custom path mapping to maintain.
+- **Con:** the native memory path is keyed off working directory, so it differs per machine (different username → different encoded path). Each machine's clone destination has to be computed separately.
+- **Con:** if Claude Code changes its native memory path scheme in a future release, your clone location may need to move.
+
+This is optional — if you prefer to keep memory in `~/repos/` and point CLAUDE.md at it, that also works. The native-dir pattern is just the lowest-friction option once you're comfortable with the layout.
 
 ## Limitations
 
@@ -236,6 +326,7 @@ This framework is designed for one person across multiple machines. For team use
 - **Claude won't proactively check repos unless told to.** Without explicit instructions, Claude will say "I don't know" instead of checking shared repos. The templates include a "When to check shared repos" section that tells Claude to check MEMORY.md indexes when asked about specific projects or names it doesn't recognize. This is scoped to avoid checking repos for general knowledge questions.
 - **Hook format may change.** Claude Code hooks are relatively new. The schema may evolve. Check the [hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) if you hit errors.
 - **Git pull on every session start.** The hook fires on the first `Read` call. If you're offline, the pull silently fails and Claude works with whatever was last pulled. No data loss, just potentially stale data.
+- **Auto-pull hook only fires in interactive sessions.** On fully headless machines (servers that only run scheduled jobs, never an interactive Claude Code session), the `Read`-matcher hook never runs. See the "Headless Machines" section above for the scheduled-pull fix.
 
 ## FAQ
 
