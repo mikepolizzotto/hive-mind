@@ -519,6 +519,16 @@ Common causes and fixes:
 
 Don't reach for `git reset --hard` as a shortcut. You could lose memory files Claude wrote on this machine that haven't been pushed yet.
 
+## If You Use This
+
+This is a small framework I built to solve my own multi-machine memory problem, then cleaned up so others could build on it. The MIT license lets you fork, modify, and build on this freely — personal or commercial — without asking. A few things I'd appreciate (none required):
+
+- A link back to this repo when you write about it, post about it, or reference it publicly
+- A star if you find it useful — it helps others discover the project
+- An issue or pull request if you find rough edges or have a better pattern to contribute
+
+If you build something interesting on top of this, I'd like to hear about it — open an issue to share where it ended up.
+
 ## License
 
 MIT
