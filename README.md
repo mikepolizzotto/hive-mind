@@ -365,6 +365,83 @@ After that, anything Claude writes via the auto-memory system is a regular file 
 
 This is optional — if you prefer to keep memory in `~/repos/` and point CLAUDE.md at it, that also works. The native-dir pattern is just the lowest-friction option once you're comfortable with the layout.
 
+## Growing Your Memory Over Time
+
+Sync alone gives you continuity — what Claude learned on one machine shows up on the others. But continuity isn't the same as *persistence*. You can have perfectly synced memory that's still shallow, stale, or disorganized enough that every new conversation starts from scratch anyway. The patterns below are what turn sync plumbing into a system you can genuinely build on across machines, projects, and months of conversations.
+
+### Organize the index as it scales
+
+The flat `See [file.md] for topic` list works for the first ~10 memories. Past that, group pointers under themed headings so the index stays scannable:
+
+```markdown
+# Memory Index
+
+## Identity & Collaboration
+See [user_profile.md](user_profile.md) — how I work.
+See [feedback_code_style.md](feedback_code_style.md) — code style corrections.
+
+## Infrastructure
+See [network.md](network.md) — network topology.
+See [backup.md](backup.md) — backup systems.
+
+## Active Projects
+See [project_foo.md](project_foo.md) — Foo migration, in progress.
+
+## Reference Pointers
+See [external_systems.md](external_systems.md) — where things live outside this repo.
+```
+
+Headings are for your own navigation — Claude doesn't care. The goal is that a human (or the next Claude session) finds the right file in three seconds instead of scrolling a wall of pointers.
+
+### Link memory to active work
+
+Memory files are pointers, not substitutes for the work itself. When a project runs for weeks or months, keep the living artifacts (plans, audits, runbooks, trackers) in a regular working directory — `~/projects/<name>/` or similar — and have a short memory file that points to it:
+
+```markdown
+---
+name: Foo Migration
+description: Ongoing migration of the Foo platform
+type: project
+---
+
+Migration from old-platform to new-platform. Active.
+
+**Why:** Compliance deadline in Q3.
+**How to apply:** Flag any work that touches Foo — full plan, tracker, and runbooks live at `~/projects/foo-migration/`.
+```
+
+This keeps memory short and navigational while the real work stays in files that can be opened, grepped, edited, and versioned separately. The memory file is the breadcrumb; the project folder is the workspace.
+
+### Treat memory as a living document, not an archive
+
+Memory isn't write-once. A memory that was true six months ago may be actively wrong today. Build the habit of updating or removing memories when:
+
+- A project finishes — move the memory into an `archive/` directory, or just delete it (git keeps the history)
+- A decision reverses — update the existing memory, don't add a second one that contradicts the first
+- A tool, path, or vendor changes — update every pointer that references the old one
+- You notice a memory has been stale the last few times Claude referenced it — either fix it or delete it
+
+Claude Code's shipped instructions already include "memories can become stale; verify before acting" — but the user side of that lifecycle is on you. Nothing in the tooling reminds you to prune, and accumulated stale memory is how a persistent system quietly turns into misinformation.
+
+### Proactive memory: shape future behavior, don't just record the past
+
+Most memory is reactive — Claude reads it when it happens to need context. But some memories exist specifically to make Claude flag things *before* you ask: upcoming deadlines, capacity thresholds, decisions waiting on input, recurring blind spots you want watched.
+
+```markdown
+---
+name: Things I want flagged unprompted
+description: Proactive monitoring list — Claude scans this and surfaces relevant items
+type: project
+---
+
+Track anything time-sensitive or threshold-based here.
+
+**Why:** If nothing reminds me, I'll miss it. Claude has enough context to surface these during any session that touches the relevant domain.
+**How to apply:** On sessions touching the relevant area, scan this file and flag anything within a 30-day window or near its threshold.
+```
+
+Paired with a collaboration memory that says "flag approaching deadlines without being asked," this turns memory from a passive read into an active check. The result is continuity that compounds: future conversations don't just know what past ones knew — they actively build on them, surface what matters, and keep you from restarting from zero each time you open Claude.
+
 ## Limitations
 
 - **No mid-session sync.** If you're on Machine A and Machine B writes a memory simultaneously, Machine A won't see it until the next session. This is fine — you're not on two machines in the same conversation.
