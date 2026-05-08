@@ -21,3 +21,11 @@ Do NOT do this for general knowledge questions. Only check repos when the questi
   cd ~/repos/<repo> && git add -A && git commit -m "[primary] description" && git push
   ```
 - When a topic might have context in another repo, read that repo's MEMORY.md index first
+
+### Concurrent sessions
+Multiple Claude Code sessions may run in parallel on this machine, all writing to the same memory clones. Before any commit you did NOT explicitly stage yourself:
+- Run `git status --short` in the shared repo first
+- If there are dirty files this session didn't touch, ask the user before sweeping them in: "I see X, Y dirty in <repo> — are you working on them in another session?"
+- If yes → commit only what this session changed using explicit paths (`git add path/to/file.md`)
+- If no/unsure → let the user inspect before deciding
+- A `SessionEnd` autosave hook (if configured) is the safety net for forgotten files; it's safe to leave dirty files for that hook to catch rather than sweeping them in here.

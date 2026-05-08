@@ -23,3 +23,11 @@ Do NOT do this for general knowledge questions. Only check repos when the questi
   cd ~/repos/<repo> && git add -A && git commit -m "[bridge] description" && git push
   ```
 - Local memory holds ONLY machine-specific notes (hostname, local paths, SSH keys) and pointers to shared repos
+
+### Concurrent sessions
+Multiple Claude Code sessions may run in parallel on this machine. Before any commit you did NOT explicitly stage yourself:
+- Run `git status --short` in the shared repo first
+- If there are dirty files this session didn't touch, ask the user before sweeping them in: "I see X, Y dirty in <repo> — are you working on them in another session?"
+- If yes → commit only what this session changed using explicit paths
+- If no/unsure → let the user inspect before deciding
+- A `SessionEnd` autosave hook (if configured) is the safety net for forgotten files.

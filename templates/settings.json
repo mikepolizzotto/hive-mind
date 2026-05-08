@@ -10,6 +10,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ cd ~/repos/work-memory && git add -A && git diff --cached --quiet || { git commit -m \"[machine-name] session-end autosave $(date '+%Y-%m-%d %H:%M:%S')\" && git push; }; } >> /tmp/memory-autosave.log 2>&1 ; true"
+          }
+        ]
+      }
     ]
   }
 }
