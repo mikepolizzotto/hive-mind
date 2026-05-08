@@ -14,6 +14,14 @@ Use private git repos as shared memory stores, with Claude Code hooks that auto-
 
 The key insight: **not all memory should go everywhere.** Different machines have different roles and different security boundaries. This framework uses domain-scoped repos with an access matrix so each machine sees only what it should.
 
+## What This Adds (And Doesn't)
+
+Claude Code now has a built-in auto-memory system that handles *what* memories look like: how they're written, what they contain, when to read them, and when not to. That layer ships with Claude Code itself and evolves with the product.
+
+What's still missing — and what this framework adds — is **sync**. Native memory is local to the machine that wrote it. This framework adds a sync layer on top: git-backed shared repos, auto-pull hooks, domain scoping, and conventions for cross-machine attribution. It deliberately stays out of native memory's way. You write memories the way Claude Code teaches you to; we just make sure they show up on every machine that should see them.
+
+If you ever find this framework and the native prompt giving conflicting guidance about memory *content*, follow the native prompt. Treat anything in this README about content as illustrative — the authoritative spec is whatever Claude Code ships with.
+
 ## Quickstart
 
 If you just want two machines sharing one memory repo, with no access boundaries between them, this is the minimum viable setup. Skip the full architecture below until you need it.
@@ -132,6 +140,8 @@ See [feedback_code_style.md](feedback_code_style.md) for code style preferences.
 ```
 
 Individual memories go in separate `.md` files with frontmatter. Claude Code's built-in [auto-memory](https://docs.anthropic.com/en/docs/claude-code/memory) uses four memory types — `user`, `feedback`, `project`, `reference` — and sets expectations about how each type should be structured. If you're using Claude's native memory system, match its conventions so future sessions parse your memories correctly.
+
+A useful filename convention is to prefix each memory with its type: `user_*.md`, `feedback_*.md`, `project_*.md`, `reference_*.md`. It's not required — Claude reads the `type` field in frontmatter, not the filename — but it makes `ls` output instantly scannable, lets you grep by category, and makes "where would I have written that down" feel obvious six months later.
 
 **`user` — who you are and how you work:**
 
@@ -333,6 +343,46 @@ The auto-pull hook in `settings.json` fires on Claude Code's first `Read` call �
 
 The helper is intentionally non-fatal: missing repos, broken network, or stale locks won't block the parent job. See `templates/CLAUDE.md.headless` for a full CLAUDE.md template designed for this machine role.
 
+### Concurrent Sessions on a Single Machine
+
+The architecture above handles sync *between* machines. A second pattern shows up once you start using Claude Code heavily on one machine: multiple Claude Code sessions running in parallel, each writing to the same memory clone. Two failure modes appear:
+
+**1. Sweep-commits bundle in unrelated work.** If Session A finishes up and runs `git add -A` before pushing, it'll sweep in any in-flight files Session B is editing in the same repo. Usually not data loss — Session A's commit just bundles two unrelated changes under a misleading message — but it makes `git log` confusing and can mask real problems.
+
+**2. New memories never get pushed.** If a session writes a memory file and you close the terminal before Claude commits, the file sits in the working tree. The next session sees it locally, but other machines never do.
+
+Two cheap fixes, used together:
+
+**Tell Claude to ask before sweep-commits.** Add a rule to your CLAUDE.md instructing Claude to run `git status --short` in shared repos before any commit it didn't explicitly stage itself, and ask before sweeping unfamiliar dirty files. Wording is in `templates/CLAUDE.md.primary` under "Concurrent sessions."
+
+**Add a SessionEnd autosave hook.** A second hook in `settings.json` that commits and pushes any leftover dirty files when a session ends. This catches forgotten memories from this session *and* anything parallel sessions left behind. Use a clearly-marked autosave commit message so these are easy to distinguish from intentional commits in `git log`:
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ cd ~/repos/work-memory && git add -A && git diff --cached --quiet || { git commit -m \"[machine-name] session-end autosave $(date '+%Y-%m-%d %H:%M:%S')\" && git push; }; } >> /tmp/memory-autosave.log 2>&1 ; true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook intentionally:
+- Uses `git diff --cached --quiet` to skip when nothing's staged (avoids empty commits)
+- Logs to `/tmp` so you can audit what got autosaved later
+- Trails with `; true` so a hook failure never blocks session end
+
+Add one block per shared repo you want autosaved. Don't autosave repos this machine only has read access to.
+
+**The parallel-session safety net is the SessionEnd hook, not the ask-first rule.** The ask-first rule is best-effort — a Claude session that forgets the rule (or runs against a CLAUDE.md that doesn't include it) will sweep-commit anyway. The SessionEnd hook fires unconditionally regardless of whether Claude remembered anything, so it catches the cases the rule misses.
+
 ### Team Use
 
 This framework is designed for one person across multiple machines. For team use, you'd want shared repos with branch-based writes or PR-based reviews. That's a different problem.
@@ -393,6 +443,31 @@ See [external_systems.md](external_systems.md) — where things live outside thi
 
 Headings are for your own navigation — Claude doesn't care. The goal is that a human (or the next Claude session) finds the right file in three seconds instead of scrolling a wall of pointers.
 
+### When the index hits 200 lines
+
+Claude Code currently truncates `MEMORY.md` at around 200 lines (observed in recent releases — check [Anthropic's memory docs](https://docs.anthropic.com/en/docs/claude-code/memory) for the current behavior). This is a harness setting, not a framework setting; you can't raise the cap from this side. Plan around it instead. Three mitigations, in order of how much pain they save:
+
+**1. Compress index entries to one line.** A pointer doesn't need a paragraph. `See [foo.md](foo.md) — one-line hook of why future-you will want this.` Anything richer belongs in `foo.md` itself. Aim for ~150 chars per index line; the index is a table of contents, not a summary.
+
+**2. Themed sub-headings.** Group pointers under `##` headers (Identity, Infrastructure, Active Projects, etc.). Doesn't save lines directly, but a 150-line index that's well-grouped is far more useful than 80 lines of flat list, so you trade quantity for navigability.
+
+**3. Two-tier indexes.** When themed groups grow past ~30 entries each, promote them to their own sub-index file. Top-level `MEMORY.md` becomes a meta-index pointing to themed sub-indexes:
+
+```markdown
+## Identity & Collaboration
+See [identity-index.md](identity-index.md) — sub-index for collaboration prefs and feedback rules.
+
+## Infrastructure
+See [infra-index.md](infra-index.md) — sub-index for network, servers, services, monitoring.
+
+## Active Projects
+See [projects-index.md](projects-index.md) — sub-index for in-flight work.
+```
+
+This trades shallow-but-wide for deep-but-focused. Cost: Claude has to read the sub-index before finding what it needs. Benefit: you stop worrying about the 200-line cap entirely. Switch to two-tier when the flat index *itself* feels like clutter — usually somewhere in the 150–200 line range.
+
+If your index is well past 200 lines and Claude is missing entries you'd expect it to find, the truncation is silently happening. `wc -l MEMORY.md` is the cheap periodic check.
+
 ### Link memory to active work
 
 Memory files are pointers, not substitutes for the work itself. When a project runs for weeks or months, keep the living artifacts (plans, audits, runbooks, trackers) in a regular working directory — `~/projects/<name>/` or similar — and have a short memory file that points to it:
@@ -451,6 +526,7 @@ Paired with a collaboration memory that says "flag approaching deadlines without
 - **Git pull on every session start.** The hook fires on the first `Read` call. If you're offline, the pull silently fails and Claude works with whatever was last pulled. No data loss, just potentially stale data.
 - **Auto-pull hook only fires in interactive sessions.** On fully headless machines (servers that only run scheduled jobs, never an interactive Claude Code session), the `Read`-matcher hook never runs. See the "Headless Machines" section above for the scheduled-pull fix.
 - **Memory-type frontmatter tracks Claude Code's built-in conventions.** The `user`/`feedback`/`project`/`reference` types and the `Why:` / `How to apply:` structure come from Claude Code's shipped prompt, not from this framework. If Anthropic changes the schema in a future release, existing memory files may need migrating. Don't treat the current schema as a stable API.
+- **Subagents may not see freshly-pushed memory mid-session.** When Claude spawns a subagent (Explore, Plan, etc.), the auto-pull hook may not fire inside the subagent's context the way it does in the parent session. If you push a memory from another machine *during* a session and immediately spawn a subagent, the subagent could miss it. In practice this is rare — most subagent runs are bounded research tasks where the parent has already pulled — but if you depend on freshness, run a manual `git pull` in the parent before spawning.
 
 ## Security Considerations
 
