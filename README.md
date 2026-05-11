@@ -383,9 +383,82 @@ Add one block per shared repo you want autosaved. Don't autosave repos this mach
 
 **The parallel-session safety net is the SessionEnd hook, not the ask-first rule.** The ask-first rule is best-effort — a Claude session that forgets the rule (or runs against a CLAUDE.md that doesn't include it) will sweep-commit anyway. The SessionEnd hook fires unconditionally regardless of whether Claude remembered anything, so it catches the cases the rule misses.
 
+### Bootstrapping a Fresh Machine
+
+When you add a new machine to the hive-mind (or replace a dead one), the work splits into two halves:
+
+1. **Get memory continuity working.** Install Claude Code, auth, install `gh`, clone the memory repos, drop in `~/.claude/CLAUDE.md` + `~/.claude/settings.json` from the role-appropriate template. Smoke test: ask Claude "what do you know about me?" — the answer should reflect content from your shared-identity repo.
+2. **Layer your domain-specific setup on top.** Install the CLI tools you actually use, auth them, copy machine-specific files that aren't in any repo (service account JSONs, deploy SSH keys, environment-variable secrets in your shell rc, scheduled-job plists).
+
+Half 1 is universal — see `templates/bootstrap-procedure.md` for the checklist. Half 2 is per-user; capture your own version inside your shared-identity repo so a replacement machine isn't a mystery.
+
+**The single biggest gotcha:** files outside the memory repos are not in any git repo by design (they're often secrets, infrastructure-bound, or both). If you don't back them up or have a regeneration procedure documented, a dead machine = several hours of reconstruction. List these files inside your shared-identity repo — one line each: what it is, where it lives, how to regenerate or where it's backed up.
+
 ### Team Use
 
 This framework is designed for one person across multiple machines. For team use, you'd want shared repos with branch-based writes or PR-based reviews. That's a different problem.
+
+## Two Accounts, One Machine
+
+A growing number of users have two (or more) Anthropic identities — a personal account, plus a work account on Anthropic Claude Enterprise (often SSO-gated via your organization's IdP). Both accounts can run Claude Code on the same machine, and you may want to swap between them depending on whose work you're doing.
+
+This framework handles that cleanly, because it's already built around the right insight.
+
+### Filesystem-tied vs account-tied
+
+When you `/logout` of one Anthropic identity on a machine and `/login` to another:
+
+**Filesystem-tied (survives the swap):**
+- `~/.claude/CLAUDE.md`, `settings.json`, hooks, locally-installed skills, the native memory directory
+- All git-backed memory repos cloned per this framework
+- All scripts, scheduled jobs, CLI tools, OAuth grants for non-Claude services
+- All working files
+
+**Account-tied (per identity, does NOT carry across):**
+- claude.ai web conversation history
+- claude.ai Projects and Files
+- MCP integrations (OAuth grants live per claude.ai account)
+- Anthropic API keys (one per console organization)
+- Subscription tier, quota, billing
+
+The good news: every memory file, every CLAUDE.md rule, every shared repo, every script just keeps working when you swap accounts. The machine's working environment is shared by both identities; only the live Anthropic identity changes.
+
+### The content rule
+
+When two accounts coexist, decide which Claude does which kind of work:
+
+- **Work content** → work-account Claude (and writes to your work-memory repo)
+- **Personal content** → personal-account Claude (and writes to your shared-identity / personal repos)
+- **Cross-cutting infrastructure** (this framework's docs, generic identity prefs) → either; writes to the shared-identity layer
+
+The work-memory / shared-identity split you already use for *storage* now also governs *which Claude does which session*. The live session is visible to whichever Anthropic tenant is hosting it (data retention and admin visibility differ), so mixing personal content into a work-account session blurs the audit trail — even if you're the org admin and could technically see everything.
+
+### Swap procedure
+
+There's no profile switch — it's a clean logout + login:
+
+1. End the current session. If you were mid-task, write a one-paragraph handoff note to shared memory so the next Claude can resume.
+2. `/logout` in Claude Code, then `/login` with the other account.
+3. On the web, close the tab and log in with the other identity.
+
+Treat the two Claudes as two co-workers who share a desk and a filing cabinet but have separate inboxes.
+
+### Conversation handoff between identities
+
+If a task starts on one identity and needs to finish on the other:
+
+1. Original Claude writes a handoff note to shared memory — current state, what's been tried, what's next, file paths involved.
+2. Swap accounts.
+3. New Claude reads the handoff note as its first action.
+
+This already works because both Claudes share the filesystem. The new thing isn't the mechanism — it's making the dead-drop explicit.
+
+### MCP and API key implications
+
+Two short audits worth doing once when you set up the second account:
+
+- **MCP inventory.** For each MCP integration authorized on the original account, decide whether to install it on the new account too. Some are domain-specific (work doc storage, work calendar) — install only on the work account. Some are personal-only (job search, travel). Some are dual-use — install on both.
+- **Direct-API audit.** If any scripts call the Anthropic API directly via the SDK, decide which key each should use. Rule of thumb: work-purposed scripts use a work API key (audit/billing visibility); personal scripts use the personal key. Both audits get easier when the surface is small — `grep -rli 'ANTHROPIC_API_KEY\|anthropic.Anthropic('` in your project directories usually finds only a handful of callers, because most everything else goes through Claude Code (which doesn't need a direct API key).
 
 ## Using Claude's Native Memory Directory as the Repo
 
@@ -517,6 +590,31 @@ Track anything time-sensitive or threshold-based here.
 
 Paired with a collaboration memory that says "flag approaching deadlines without being asked," this turns memory from a passive read into an active check. The result is continuity that compounds: future conversations don't just know what past ones knew — they actively build on them, surface what matters, and keep you from restarting from zero each time you open Claude.
 
+### Hostname-aware shared docs
+
+Once you have more than one machine on the hive-mind, a useful pattern emerges: shared docs that contain per-machine sections, with a discovery flow where each machine reads "its own" subsection as its to-do list.
+
+The pattern is simple — a single file in your shared-identity repo has subsections keyed by hostname:
+
+```markdown
+## Captures pending — run on the relevant machine
+
+### Pending on <machine-A>
+[runnable command block]
+
+### Pending on <machine-B>
+[runnable command block]
+```
+
+When a Claude Code session opens on machine-A, you can ask: "what's pending for this machine?" Claude reads the file, matches its `hostname` to the right subsection, runs the commands, and proposes the captured state as a diff to apply. The subsection gets struck out when done.
+
+Why this beats per-machine TODO files:
+- The doc is the single source of truth across every machine (each machine sees the full list but only acts on its own row).
+- New homework added on any machine shows up on every other machine after the next pull.
+- Resolved homework is removed in one place — no risk of stale to-dos lingering across machines.
+
+Use this when you have machine-specific captures (hardware/OS confirmation, local config snapshots, environment variable inventories) that you want a future-you on the right machine to surface unprompted.
+
 ## Limitations
 
 - **No mid-session sync.** If you're on Machine A and Machine B writes a memory simultaneously, Machine A won't see it until the next session. This is fine — you're not on two machines in the same conversation.
@@ -527,6 +625,7 @@ Paired with a collaboration memory that says "flag approaching deadlines without
 - **Auto-pull hook only fires in interactive sessions.** On fully headless machines (servers that only run scheduled jobs, never an interactive Claude Code session), the `Read`-matcher hook never runs. See the "Headless Machines" section above for the scheduled-pull fix.
 - **Memory-type frontmatter tracks Claude Code's built-in conventions.** The `user`/`feedback`/`project`/`reference` types and the `Why:` / `How to apply:` structure come from Claude Code's shipped prompt, not from this framework. If Anthropic changes the schema in a future release, existing memory files may need migrating. Don't treat the current schema as a stable API.
 - **Subagents may not see freshly-pushed memory mid-session.** When Claude spawns a subagent (Explore, Plan, etc.), the auto-pull hook may not fire inside the subagent's context the way it does in the parent session. If you push a memory from another machine *during* a session and immediately spawn a subagent, the subagent could miss it. In practice this is rare — most subagent runs are bounded research tasks where the parent has already pulled — but if you depend on freshness, run a manual `git pull` in the parent before spawning.
+- **MCP integrations are account-tied, not machine-tied.** If you have two Anthropic accounts on one machine (e.g., personal + Claude Enterprise), each account has its own MCP installations. The auto-pull hook still works across the swap because memory repos are filesystem-tied, but mid-conversation references to an MCP installed only on the other account will fail. See "Two Accounts, One Machine" for the full model.
 
 ## Security Considerations
 
