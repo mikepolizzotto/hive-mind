@@ -55,18 +55,17 @@ separate .md files. After writing, commit and push with a
 ```json
 {
   "hooks": {
-    "PreToolUse": [{
-      "matcher": "Read",
+    "SessionStart": [{
       "hooks": [{
         "type": "command",
-        "command": "git -C ~/repos/shared-memory pull --ff-only 2>/dev/null; true"
+        "command": "git -C ~/repos/shared-memory pull --ff-only --quiet >/dev/null 2>&1; true"
       }]
     }]
   }
 }
 ```
 
-That's it. Each machine will pull on first `Read` of a session and push memories Claude writes. Read on for security boundaries, multi-domain setups, headless machines, and the full pattern. Graduate to those when the simple path hits a limit.
+That's it. Each machine pulls when a session starts and pushes memories Claude writes. Read on for security boundaries, multi-domain setups, headless machines, and the full pattern. Graduate to those when the simple path hits a limit.
 
 ## Architecture
 
@@ -76,7 +75,7 @@ Instead of one giant synced folder, split memory into domains. Each domain gets 
 
 | Repo | Domain | Example Contents |
 |------|--------|-----------------|
-| `work-memory` | Work / professional | Server configs, API credentials, vendor details, SaaS audits |
+| `work-memory` | Work / professional | Server configs, credential locations and rotation notes, vendor details, SaaS audits |
 | `shared-identity` | Universal (shared by all machines) | User profile, collaboration preferences, feedback rules |
 | `homelab-memory` | Homelab / personal infra | Device baselines, network configs, monitoring dashboards |
 
@@ -234,18 +233,17 @@ This machine has access to the following memory repos:
 
 ### 4. Add the Auto-Pull Hook
 
-Add this to `~/.claude/settings.json` so Claude automatically pulls fresh data on the first file read of each session:
+Add this to `~/.claude/settings.json` so Claude automatically pulls fresh data when each session starts:
 
 ```json
 {
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Read",
         "hooks": [
           {
             "type": "command",
-            "command": "git -C ~/repos/shared-identity pull --ff-only 2>/dev/null; git -C ~/repos/work-memory pull --ff-only 2>/dev/null; true"
+            "command": "git -C ~/repos/shared-identity pull --ff-only --quiet >/dev/null 2>&1; git -C ~/repos/work-memory pull --ff-only --quiet >/dev/null 2>&1; true"
           }
         ]
       }
@@ -254,7 +252,7 @@ Add this to `~/.claude/settings.json` so Claude automatically pulls fresh data o
 }
 ```
 
-Only include repos that exist on that machine. The trailing `true` ensures the hook doesn't fail if a pull has no changes.
+Only include repos that exist on that machine. The trailing `true` ensures the hook doesn't fail if a pull has no changes. Output is redirected to `/dev/null` because `SessionStart` hook stdout is added to Claude's context — an unsilenced `git pull` would open every session with `Already up to date.` noise.
 
 See [templates/settings.json](templates/settings.json) for a complete example.
 
@@ -292,7 +290,7 @@ This is configured in your CLAUDE.md rules, not enforced by git.
               └─────────────┘         └─────────────┘
 ```
 
-1. **Session start** → Hook fires on first `Read` call → `git pull --ff-only` on all shared repos
+1. **Session start** → `SessionStart` hook fires → `git pull --ff-only` on all shared repos
 2. **Claude needs context** → Reads `MEMORY.md` index from relevant repo → Reads specific memory files
 3. **Claude writes a memory** → Writes to the correct repo based on domain → Commits with `[machine-name]` prefix → Pushes to GitHub
 4. **Next session on any machine** → Hook pulls → New memory is available everywhere
@@ -329,7 +327,7 @@ Add repos per domain and restrict access. A machine that doesn't need work crede
 
 ### Headless Machines (No Interactive Sessions)
 
-The auto-pull hook in `settings.json` fires on Claude Code's first `Read` call, which means it only fires during **interactive** sessions. If a machine only ever runs automated jobs (a homelab server, a CI runner, a scheduled scraper) and you never open a Claude Code session on it directly, the hook never runs and the local clone silently goes stale. In practice this can drift by days or weeks before anyone notices.
+The auto-pull hook in `settings.json` runs on `SessionStart` — when a Claude Code session begins. A fully headless machine never starts one: if it only runs automated jobs (a homelab server, a CI runner, a scheduled scraper) and you never open a Claude Code session on it, the hook never fires. And scheduled jobs that read memory files directly don't go through Claude Code at all, so no hook sits on their path. Either way the local clone silently goes stale — often for days or weeks before anyone notices.
 
 **Fix:** piggyback `git pull --ff-only` onto an existing scheduled job on that machine (cron, launchd, systemd timer). Don't create a new dedicated sync-only job; just add the pull at the top of a job that already runs on the cadence you need.
 
@@ -365,7 +363,7 @@ Two cheap fixes, used together:
         "hooks": [
           {
             "type": "command",
-            "command": "{ cd ~/repos/work-memory && git add -A && git diff --cached --quiet || { git commit -m \"[machine-name] session-end autosave $(date '+%Y-%m-%d %H:%M:%S')\" && git push; }; } >> /tmp/memory-autosave.log 2>&1 ; true"
+            "command": "{ cd ~/repos/work-memory || exit 0; git add -A && { git diff --cached --quiet || { git commit -m \"[machine-name] session-end autosave $(date '+%Y-%m-%d %H:%M:%S')\" && git push; }; }; } >> /tmp/memory-autosave.log 2>&1 ; true"
           }
         ]
       }
@@ -375,6 +373,7 @@ Two cheap fixes, used together:
 ```
 
 The hook intentionally:
+- Starts with `cd … || exit 0` so a missing directory aborts the hook, instead of falling through to run `git add -A` and `git commit` in whatever directory the session happened to be in
 - Uses `git diff --cached --quiet` to skip when nothing's staged (avoids empty commits)
 - Logs to `/tmp` so you can audit what got autosaved later
 - Trails with `; true` so a hook failure never blocks session end
@@ -621,8 +620,8 @@ Use this when you have machine-specific captures (hardware/OS confirmation, loca
 - **Claude must follow CLAUDE.md instructions.** The commit-and-push behavior isn't enforced by tooling; it's instructed via CLAUDE.md. New sessions don't carry behavioral patterns from previous ones; they just read the instructions. If Claude forgets to push, the other machines get stale data.
 - **Claude won't proactively check repos unless told to.** Without explicit instructions, Claude will say "I don't know" instead of checking shared repos. The templates include a "When to check shared repos" section that tells Claude to check MEMORY.md indexes when asked about specific projects or names it doesn't recognize. This is scoped to avoid checking repos for general knowledge questions.
 - **Hook format may change.** Claude Code hooks are relatively new. The schema may evolve. Check the [hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks) if you hit errors.
-- **Git pull on every session start.** The hook fires on the first `Read` call. If you're offline, the pull silently fails and Claude works with whatever was last pulled. No data loss, just potentially stale data.
-- **Auto-pull hook only fires in interactive sessions.** On fully headless machines (servers that only run scheduled jobs, never an interactive Claude Code session), the `Read`-matcher hook never runs. See the "Headless Machines" section above for the scheduled-pull fix.
+- **Git pull on every session start.** The `SessionStart` hook runs `git pull` when each session begins. If you're offline, the pull silently fails and Claude works with whatever was last pulled. No data loss, just potentially stale data.
+- **Auto-pull hook needs a Claude Code session to fire.** The `SessionStart` hook runs when a Claude Code session begins. A fully headless machine never starts one, and scheduled jobs that read memory files directly bypass Claude Code entirely — so the hook never runs there. See the "Headless Machines" section above for the scheduled-pull fix.
 - **Memory-type frontmatter tracks Claude Code's built-in conventions.** The `user`/`feedback`/`project`/`reference` types and the `Why:` / `How to apply:` structure come from Claude Code's shipped prompt, not from this framework. If Anthropic changes the schema in a future release, existing memory files may need migrating. Don't treat the current schema as a stable API.
 - **Subagents may not see freshly-pushed memory mid-session.** When Claude spawns a subagent (Explore, Plan, etc.), the auto-pull hook may not fire inside the subagent's context the way it does in the parent session. If you push a memory from another machine *during* a session and immediately spawn a subagent, the subagent could miss it. In practice this is rare (most subagent runs are bounded research tasks where the parent has already pulled), but if you depend on freshness, run a manual `git pull` in the parent before spawning.
 - **MCP integrations are account-tied, not machine-tied.** If you have two Anthropic accounts on one machine (e.g., personal + Claude Enterprise), each account has its own MCP installations. The auto-pull hook still works across the swap because memory repos are filesystem-tied, but mid-conversation references to an MCP installed only on the other account will fail. See "Two Accounts, One Machine" for the full model.
@@ -638,7 +637,7 @@ A machine with write access to every repo is also a machine that can poison ever
 - Consider signed commits on shared-identity if your threat model includes a compromised machine.
 
 ### Silent pull failures
-The `2>/dev/null` in the auto-pull hook means a failed pull looks identical to a successful pull that had nothing to fetch. If a machine's auth breaks (expired token, revoked SSH key, repo renamed) it will keep running on stale memory indefinitely with no warning. Before high-trust work on a machine you haven't used recently, run a manual pull to surface any error:
+The silenced output in the auto-pull hook means a failed pull looks identical to a successful pull that had nothing to fetch. If a machine's auth breaks (expired token, revoked SSH key, repo renamed) it will keep running on stale memory indefinitely with no warning. Before high-trust work on a machine you haven't used recently, run a manual pull to surface any error:
 
 ```bash
 git -C ~/repos/shared-identity pull --ff-only
@@ -670,11 +669,11 @@ Yes. Clone the repos on the server, create the CLAUDE.md and settings.json, and 
 
 **What if two machines write to the same file?**
 
-The file-per-memory pattern makes this rare. If it happens, `git pull --ff-only` will fail silently (the `2>/dev/null` suppresses it), and the next manual pull will show the conflict. Resolve by keeping the newer version.
+The file-per-memory pattern makes this rare. If it happens, `git pull --ff-only` will fail silently (the hook suppresses its output), and the next manual pull will show the conflict. Resolve by keeping the newer version.
 
 **`git pull --ff-only` keeps failing. How do I recover?**
 
-The hook swallows errors with `2>/dev/null`, so pull failures are invisible. If memories aren't syncing, run the pull manually to see the real error:
+The hook silences output, so pull failures are invisible. If memories aren't syncing, run the pull manually to see the real error:
 
 ```bash
 git -C ~/repos/shared-identity pull --ff-only

@@ -2,10 +2,12 @@
 # Non-fatal sync for shared memory repos on headless machines.
 #
 # Call this from the top of any job that already runs on a schedule
-# (cron, launchd, systemd timer). The PreToolUse "Read" auto-pull
-# hook in settings.json only fires during interactive Claude Code
-# sessions — fully headless machines never hit it, so without this
-# the local clones can drift for days or weeks before anyone notices.
+# (cron, launchd, systemd timer). The SessionStart auto-pull hook in
+# settings.json fires only when a Claude Code session starts — a
+# fully headless machine never starts one, and scheduled jobs that
+# read memory files directly bypass Claude Code entirely. Without
+# this the local clones can drift for days or weeks before anyone
+# notices.
 #
 # Usage: source this from an existing scheduled job, or exec it
 # directly. It's intentionally non-fatal: a missing repo, broken
@@ -18,7 +20,7 @@ set +e
 
 REPOS=(
     "$HOME/repos/shared-identity"
-    "$HOME/repos/automation-memory"
+    "$HOME/repos/homelab-memory"
 )
 
 for repo in "${REPOS[@]}"; do
