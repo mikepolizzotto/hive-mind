@@ -1,9 +1,9 @@
 # Headless Machine (Automation Only, No Interactive Sessions)
 #
-# This machine runs scheduled jobs but no human ever opens an
-# interactive Claude Code session here. The PreToolUse "Read" hook
-# never fires, so the auto-pull mechanism from settings.json doesn't
-# work on this machine. You need a scheduled pull instead.
+# This machine runs scheduled jobs but no human ever opens a
+# Claude Code session here. The SessionStart auto-pull hook from
+# settings.json fires only when a session starts, so it never runs
+# on this machine. You need a scheduled pull instead.
 #
 # See the "Headless Machines" section in README.md for the full
 # rationale. Customize repo names and commit prefix for your setup.
@@ -12,11 +12,11 @@
 
 This machine has access to the following memory repos:
 - **shared-identity**: ~/repos/shared-identity/ (read-write)
-- **automation-memory**: ~/repos/automation-memory/ (read-write, source of truth for this machine's domain)
+- **homelab-memory**: ~/repos/homelab-memory/ (read-write, source of truth for this machine's domain)
 
 ### Scheduled pull (required)
-Because no interactive session ever runs here, the auto-pull hook
-from settings.json never fires. Instead, piggyback
+Because no Claude Code session ever runs here, the `SessionStart`
+auto-pull hook from settings.json never fires. Instead, piggyback
 `git pull --ff-only` onto an existing scheduled job (cron, launchd,
 systemd timer). Prefer piggybacking over a dedicated sync-only job
 — fewer moving parts, and the pull runs exactly when fresh data
@@ -29,7 +29,7 @@ If the user asks about a specific project, tool, repo, system, or name that you 
 Do NOT do this for general knowledge questions. Only check repos when the question is about something specific to the user's projects or infrastructure.
 
 ### Rules
-- Domain-specific memories → automation-memory
+- Domain-specific memories → homelab-memory
 - Universal memories (user prefs, collaboration style, feedback that applies everywhere) → shared-identity
 - After writing to a shared repo:
   ```bash
