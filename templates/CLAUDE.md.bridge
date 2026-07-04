@@ -9,7 +9,7 @@
 This machine has access to the following memory repos:
 - **work-memory**: ~/repos/work-memory/ (read-write)
 - **shared-identity**: ~/repos/shared-identity/ (read-write)
-- **homelab-memory**: ~/repos/homelab-memory/ (read-only — never commit/push, write via homelab server)
+- **homelab-memory**: ~/repos/homelab-memory/ (read-only — never commit/push, write via the machine that owns it)
 
 ### When to check shared repos
 If the user asks about a specific project, tool, repo, system, or name that you don't immediately recognize — check the MEMORY.md index in each shared repo before saying "I don't know." If any index references the topic, read the linked file before responding.

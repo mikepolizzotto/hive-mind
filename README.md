@@ -1,18 +1,37 @@
 # Hive Mind
 
-A framework for keeping Claude Code's memory in sync across multiple machines using git-backed repos and auto-pull hooks.
+Give Claude Code a long-term memory that follows you. Git-backed memory repos, auto-synced across every machine you use: what Claude learns anywhere, it knows everywhere.
 
 ## The Problem
 
-Claude Code's [auto memory](https://docs.anthropic.com/en/docs/claude-code/memory) is machine-local. If you use Claude Code on more than one machine (a work laptop, a home desktop, a headless server), each one is its own island. Context learned on one machine doesn't exist on the others. You end up re-explaining who you are, how you work, and what you're building every time you switch machines.
+Claude Code's [auto memory](https://docs.anthropic.com/en/docs/claude-code/memory) means Claude genuinely learns as you work: how you like to collaborate, what you're building, which decisions you made and why. But that learning is trapped on the machine where it happened. Use Claude Code on more than one machine and each one is its own island — you end up re-explaining who you are, how you work, and what you're building every time you switch chairs.
 
 There's no built-in sync. [People have been asking for it.](https://github.com/anthropics/claude-code/issues/25739)
 
 ## The Solution
 
-Use private git repos as shared memory stores, with Claude Code hooks that auto-pull on session start and CLAUDE.md files that tell each instance where to look.
+Put the memories in git. Private git repos become the memory stores; a Claude Code hook auto-pulls them when a session starts; a few lines of CLAUDE.md tell each instance where to look and what to write back. Any machine picks up exactly where you left off, simply by pointing at the same repos.
 
-Not all memory should go everywhere. Different machines have different roles and different security boundaries. This framework uses domain-scoped repos with an access matrix so each machine sees only what it should.
+**What this feels like:**
+
+> Monday, on your desktop, you tell Claude you prefer terse answers, and mention that your side project's migration is blocked on a schema decision. Claude writes both down and pushes.
+>
+> Wednesday, on your laptop, a fresh session pulls on start. You ask *"where did we leave off on the migration?"* — Claude answers from memory, in the terse style you asked for. Nothing was re-explained. The laptop was never told anything; it just points at the same git repos.
+
+One repo shared by every machine is a perfectly good setup. When your memory spans contexts that shouldn't mix — personal vs. professional, or per-client — you split it into multiple repos: each session reads across every repo its machine has, and a machine that shouldn't hold a domain simply never clones it.
+
+## How Claude Works With Memory
+
+Everything below is plumbing for one loop:
+
+1. **Learn.** Mid-session, Claude notices something worth keeping — a preference you stated, a correction you gave, a decision made on a project.
+2. **Write.** It saves the memory as its own small `.md` file in the right repo, and adds a one-line pointer to that repo's `MEMORY.md` index.
+3. **Share.** It commits with a `[machine-name]` prefix and pushes.
+4. **Recall.** The next session — on any machine — auto-pulls, scans the indexes, and reads the memory the moment it becomes relevant.
+
+Every pass through the loop makes the next session smarter, and the loop runs everywhere you work. Memory isn't a write-once archive, either: sessions update memories that changed, prune ones that went stale, and reorganize the index as it grows — see [Growing Your Memory Over Time](#growing-your-memory-over-time).
+
+A session also isn't limited to one memory store at a time. Claude reads across every repo its machine has. Ask about deploying a side project and it can pull your deployment preferences from your identity repo, the project's current state from a project repo, and a pointer to the runbook from a third — cross-referencing all of them in a single answer. The CLAUDE.md templates in this repo explicitly tell Claude to check every index before saying "I don't know."
 
 ## What This Adds (And Doesn't)
 
@@ -69,19 +88,20 @@ That's it. Each machine pulls when a session starts and pushes memories Claude w
 
 ## Architecture
 
-### Domain-Scoped Repos
+### One Repo or Many
 
-Instead of one giant synced folder, split memory into domains. Each domain gets its own private git repo:
+The smallest hive-mind is one private repo cloned on two machines — the Quickstart above, and a perfectly good permanent setup. Splitting into multiple repos is worth it when your memory spans contexts that don't belong together. Each repo gets a clear boundary, and a machine only clones the repos it should hold. Some shapes this takes:
 
-| Repo | Domain | Example Contents |
-|------|--------|-----------------|
-| `work-memory` | Work / professional | Server configs, credential locations and rotation notes, vendor details, SaaS audits |
-| `shared-identity` | Universal (shared by all machines) | User profile, collaboration preferences, feedback rules |
-| `homelab-memory` | Homelab / personal infra | Device baselines, network configs, monitoring dashboards |
+| Setup | Repos |
+|-------|-------|
+| Everything together | `shared-memory` |
+| Identity + projects | `shared-identity`, `projects-memory` |
+| Professional / personal split | `shared-identity`, `work-memory`, `homelab-memory` |
+| Consultant with per-client boundaries | `shared-identity`, `client-a-memory`, `client-b-memory` |
 
-You might only need two repos, or you might need four. The number depends on your setup. The important thing is that each repo has a clear boundary.
+The rest of this README uses the professional/personal split (`work-memory`, `shared-identity`, `homelab-memory`) as its worked example, because three repos is enough to show every pattern. Don't read that as the intended shape — the framework doesn't care whether you have one repo or nine, and none of the mechanics change.
 
-**A note on naming.** The repo names above (`work-memory`, `shared-identity`, `homelab-memory`) are descriptive placeholders; use whatever tells you what's inside at a glance. Many users pick a theme so the names are memorable: brain anatomy, geography, mythology, whatever. The framework doesn't care about the names; your CLAUDE.md is what maps each repo to its purpose.
+**A note on naming.** The example names are descriptive placeholders; use whatever tells you what's inside at a glance. Many users pick a theme so the names are memorable: brain anatomy, geography, mythology, whatever. The framework doesn't care about the names; your CLAUDE.md is what maps each repo to its purpose.
 
 ### The Shared Identity Layer
 
@@ -94,22 +114,7 @@ One repo must be readable by **every** machine. This is your shared identity lay
 
 This layer is what keeps Claude consistent across machines.
 
-### Access Matrix
-
-Each machine gets explicit read/write permissions per repo:
-
-| | work-memory | shared-identity | homelab-memory |
-|---|---|---|---|
-| **Work Machine** | read-write | read-write | read-only |
-| **Home Laptop** | read-write | read-write | read-only |
-| **Homelab Server** | **no access** | read-write | read-write |
-
-Key principles:
-- **Write access = source of truth.** Only one or two machines should write to each repo.
-- **Read-only access = cross-referencing.** A machine can see context without being able to modify it.
-- **No access = security boundary.** Sensitive work data (API keys, internal IPs) shouldn't exist on every machine.
-
-Customize this matrix for your setup. The framework doesn't enforce it; your CLAUDE.md files do.
+If your repos have different security needs, give each machine explicit read/write/no-access permissions per repo — see [Three+ Machines with Security Boundaries](#three-machines-with-security-boundaries) below for the access-matrix pattern.
 
 ## Setup
 
@@ -261,9 +266,9 @@ See [templates/settings.json](templates/settings.json) for a complete example.
 Tag every commit with the machine name so `git log` shows which Claude wrote what:
 
 ```
-[work-laptop] updated network documentation after firewall changes
-[homelab-server] added proxmox baseline metrics
-[home-laptop] updated collaboration preferences
+[desktop] updated network documentation after firewall changes
+[headless-server] added proxmox baseline metrics
+[laptop] updated collaboration preferences
 ```
 
 This is configured in your CLAUDE.md rules, not enforced by git.
@@ -272,7 +277,7 @@ This is configured in your CLAUDE.md rules, not enforced by git.
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Work Machine   │     │   Home Laptop   │     │ Homelab Server  │
+│     Desktop     │     │     Laptop      │     │ Headless Server │
 │                 │     │                 │     │                 │
 │ Claude Code     │     │ Claude Code     │     │ Claude Code     │
 │   ↕ read/write  │     │   ↕ read/write  │     │   ↕ read/write  │
@@ -308,6 +313,133 @@ See [backups.md](backups.md) for backup infrastructure deep dive.
 
 Keep `MEMORY.md` short. Claude Code currently truncates the index around 200 lines. This is observed behavior in recent releases rather than a documented stable limit, so check [Anthropic's memory docs](https://docs.anthropic.com/en/docs/claude-code/memory) if you need to rely on a specific number. Either way, if your index is growing, your individual memory files should absorb the detail.
 
+## Growing Your Memory Over Time
+
+Sync gives you continuity: what Claude learned on one machine shows up on the others. But continuity alone isn't enough. Perfectly synced memory can still be shallow, stale, or disorganized enough that every new conversation starts from scratch. The patterns below help turn sync plumbing into something usable across machines, projects, and months of conversations.
+
+### Organize the index as it scales
+
+The flat `See [file.md] for topic` list works for the first ~10 memories. Past that, group pointers under themed headings so the index stays scannable:
+
+```markdown
+# Memory Index
+
+## Identity & Collaboration
+See [user_profile.md](user_profile.md) for how I work.
+See [feedback_code_style.md](feedback_code_style.md) for code style corrections.
+
+## Infrastructure
+See [network.md](network.md) for network topology.
+See [backup.md](backup.md) for backup systems.
+
+## Active Projects
+See [project_atlas.md](project_atlas.md) for the Atlas migration, in progress.
+
+## Reference Pointers
+See [external_systems.md](external_systems.md) for where things live outside this repo.
+```
+
+Headings are for your own navigation; Claude doesn't care. The goal is that a human (or the next Claude session) finds the right file in three seconds instead of scrolling a wall of pointers.
+
+### When the index hits 200 lines
+
+Claude Code currently truncates `MEMORY.md` at around 200 lines (observed in recent releases; check [Anthropic's memory docs](https://docs.anthropic.com/en/docs/claude-code/memory) for the current behavior). This is a harness setting, not a framework setting; you can't raise the cap from this side. Plan around it instead. Three mitigations, in order of how much pain they save:
+
+**1. Compress index entries to one line.** A pointer doesn't need a paragraph. `See [topic.md](topic.md) for a one-line hook of why future-you will want this.` Anything richer belongs in `topic.md` itself. Aim for ~150 chars per index line; the index is a table of contents, not a summary.
+
+**2. Themed sub-headings.** Group pointers under `##` headers (Identity, Infrastructure, Active Projects, etc.). Doesn't save lines directly, but a 150-line index that's well-grouped is far more useful than 80 lines of flat list, so you trade quantity for navigability.
+
+**3. Two-tier indexes.** When themed groups grow past ~30 entries each, promote them to their own sub-index file. Top-level `MEMORY.md` becomes a meta-index pointing to themed sub-indexes:
+
+```markdown
+## Identity & Collaboration
+See [identity-index.md](identity-index.md) for collaboration prefs and feedback rules.
+
+## Infrastructure
+See [infra-index.md](infra-index.md) for network, servers, services, monitoring.
+
+## Active Projects
+See [projects-index.md](projects-index.md) for in-flight work.
+```
+
+This trades shallow-but-wide for deep-but-focused. Cost: Claude has to read the sub-index before finding what it needs. Benefit: you stop worrying about the 200-line cap entirely. Switch to two-tier when the flat index *itself* feels like clutter, usually somewhere in the 150–200 line range.
+
+If your index is well past 200 lines and Claude is missing entries you'd expect it to find, the truncation is silently happening. `wc -l MEMORY.md` is the cheap periodic check.
+
+### Link memory to active work
+
+Memory files are pointers, not substitutes for the work itself. When a project runs for weeks or months, keep the living artifacts (plans, audits, runbooks, trackers) in a regular working directory (`~/projects/<name>/` or similar) and have a short memory file that points to it:
+
+```markdown
+---
+name: Atlas Migration
+description: Ongoing migration of the Atlas platform
+type: project
+---
+
+Migration from old-platform to new-platform. Active.
+
+**Why:** Compliance deadline in Q3.
+**How to apply:** Flag any work that touches Atlas. Full plan, tracker, and runbooks live at `~/projects/atlas-migration/`.
+```
+
+This keeps memory short and navigational while the real work stays in files that can be opened, grepped, edited, and versioned separately. The memory file is the breadcrumb; the project folder is the workspace.
+
+### Treat memory as a living document, not an archive
+
+Memory isn't write-once. A memory that was true six months ago may be actively wrong today. Build the habit of updating or removing memories when:
+
+- A project finishes: move the memory into an `archive/` directory, or just delete it (git keeps the history)
+- A decision reverses: update the existing memory, don't add a second one that contradicts the first
+- A tool, path, or vendor changes: update every pointer that references the old one
+- You notice a memory has been stale the last few times Claude referenced it: either fix it or delete it
+
+Claude Code's shipped instructions already include "memories can become stale; verify before acting," but the user side of that lifecycle is on you. Nothing in the tooling reminds you to prune, and accumulated stale memory is how a persistent system quietly turns into misinformation.
+
+### Proactive memory: shape future behavior, don't just record the past
+
+Most memory is reactive: Claude reads it when it happens to need context. But some memories exist specifically to make Claude flag things *before* you ask: upcoming deadlines, capacity thresholds, decisions waiting on input, recurring blind spots you want watched.
+
+```markdown
+---
+name: Things I want flagged unprompted
+description: Proactive monitoring list. Claude scans this and surfaces relevant items.
+type: project
+---
+
+Track anything time-sensitive or threshold-based here.
+
+**Why:** If nothing reminds me, I'll miss it. Claude has enough context to surface these during any session that touches the relevant domain.
+**How to apply:** On sessions touching the relevant area, scan this file and flag anything within a 30-day window or near its threshold.
+```
+
+Paired with a collaboration memory that says "flag approaching deadlines without being asked," this turns memory into something Claude actively checks against rather than just looks up when prompted.
+
+### Hostname-aware shared docs
+
+Once you have more than one machine on the hive-mind, you can use shared docs with per-machine sections, where each machine reads "its own" subsection as a to-do list.
+
+A single file in your shared-identity repo has subsections keyed by hostname:
+
+```markdown
+## Captures pending. Run on the relevant machine
+
+### Pending on <machine-A>
+[runnable command block]
+
+### Pending on <machine-B>
+[runnable command block]
+```
+
+When a Claude Code session opens on machine-A, you can ask: "what's pending for this machine?" Claude reads the file, matches its `hostname` to the right subsection, runs the commands, and proposes the captured state as a diff to apply. The subsection gets struck out when done.
+
+Why this beats per-machine TODO files:
+- The doc is the single source of truth across every machine (each machine sees the full list but only acts on its own row).
+- New homework added on any machine shows up on every other machine after the next pull.
+- Resolved homework is removed in one place. No risk of stale to-dos lingering across machines.
+
+Use this when you have machine-specific captures (hardware/OS confirmation, local config snapshots, environment variable inventories) that you want a future-you on the right machine to surface unprompted.
+
 ## Customizing for Your Setup
 
 ### Two Machines (Simplest)
@@ -323,7 +455,20 @@ Both machines get read-write on both repos. No access restrictions needed.
 
 ### Three+ Machines with Security Boundaries
 
-Add repos per domain and restrict access. A machine that doesn't need work credentials shouldn't have a clone of the repo that contains them.
+Add repos per domain and restrict access. A machine that doesn't need work credentials shouldn't have a clone of the repo that contains them. Make the permissions explicit with an access matrix:
+
+| | work-memory | shared-identity | homelab-memory |
+|---|---|---|---|
+| **Desktop** | read-write | read-write | read-only |
+| **Laptop** | read-write | read-write | read-only |
+| **Headless Server** | **no access** | read-write | read-write |
+
+Key principles:
+- **Write access = source of truth.** Only one or two machines should write to each repo.
+- **Read-only access = cross-referencing.** A machine can see context without being able to modify it.
+- **No access = security boundary.** Sensitive work data (API keys, internal IPs) shouldn't exist on every machine.
+
+The framework doesn't enforce the matrix; your CLAUDE.md files do — and a repo a machine shouldn't even read is simply never cloned there.
 
 ### Headless Machines (No Interactive Sessions)
 
@@ -487,133 +632,6 @@ After that, anything Claude writes via the auto-memory system is a regular file 
 
 This is optional. If you prefer to keep memory in `~/repos/` and point CLAUDE.md at it, that also works. The native-dir pattern is just the lowest-friction option once you're comfortable with the layout.
 
-## Growing Your Memory Over Time
-
-Sync gives you continuity: what Claude learned on one machine shows up on the others. But continuity alone isn't enough. Perfectly synced memory can still be shallow, stale, or disorganized enough that every new conversation starts from scratch. The patterns below help turn sync plumbing into something usable across machines, projects, and months of conversations.
-
-### Organize the index as it scales
-
-The flat `See [file.md] for topic` list works for the first ~10 memories. Past that, group pointers under themed headings so the index stays scannable:
-
-```markdown
-# Memory Index
-
-## Identity & Collaboration
-See [user_profile.md](user_profile.md) for how I work.
-See [feedback_code_style.md](feedback_code_style.md) for code style corrections.
-
-## Infrastructure
-See [network.md](network.md) for network topology.
-See [backup.md](backup.md) for backup systems.
-
-## Active Projects
-See [project_atlas.md](project_atlas.md) for the Atlas migration, in progress.
-
-## Reference Pointers
-See [external_systems.md](external_systems.md) for where things live outside this repo.
-```
-
-Headings are for your own navigation; Claude doesn't care. The goal is that a human (or the next Claude session) finds the right file in three seconds instead of scrolling a wall of pointers.
-
-### When the index hits 200 lines
-
-Claude Code currently truncates `MEMORY.md` at around 200 lines (observed in recent releases; check [Anthropic's memory docs](https://docs.anthropic.com/en/docs/claude-code/memory) for the current behavior). This is a harness setting, not a framework setting; you can't raise the cap from this side. Plan around it instead. Three mitigations, in order of how much pain they save:
-
-**1. Compress index entries to one line.** A pointer doesn't need a paragraph. `See [topic.md](topic.md) for a one-line hook of why future-you will want this.` Anything richer belongs in `topic.md` itself. Aim for ~150 chars per index line; the index is a table of contents, not a summary.
-
-**2. Themed sub-headings.** Group pointers under `##` headers (Identity, Infrastructure, Active Projects, etc.). Doesn't save lines directly, but a 150-line index that's well-grouped is far more useful than 80 lines of flat list, so you trade quantity for navigability.
-
-**3. Two-tier indexes.** When themed groups grow past ~30 entries each, promote them to their own sub-index file. Top-level `MEMORY.md` becomes a meta-index pointing to themed sub-indexes:
-
-```markdown
-## Identity & Collaboration
-See [identity-index.md](identity-index.md) for collaboration prefs and feedback rules.
-
-## Infrastructure
-See [infra-index.md](infra-index.md) for network, servers, services, monitoring.
-
-## Active Projects
-See [projects-index.md](projects-index.md) for in-flight work.
-```
-
-This trades shallow-but-wide for deep-but-focused. Cost: Claude has to read the sub-index before finding what it needs. Benefit: you stop worrying about the 200-line cap entirely. Switch to two-tier when the flat index *itself* feels like clutter, usually somewhere in the 150–200 line range.
-
-If your index is well past 200 lines and Claude is missing entries you'd expect it to find, the truncation is silently happening. `wc -l MEMORY.md` is the cheap periodic check.
-
-### Link memory to active work
-
-Memory files are pointers, not substitutes for the work itself. When a project runs for weeks or months, keep the living artifacts (plans, audits, runbooks, trackers) in a regular working directory (`~/projects/<name>/` or similar) and have a short memory file that points to it:
-
-```markdown
----
-name: Atlas Migration
-description: Ongoing migration of the Atlas platform
-type: project
----
-
-Migration from old-platform to new-platform. Active.
-
-**Why:** Compliance deadline in Q3.
-**How to apply:** Flag any work that touches Atlas. Full plan, tracker, and runbooks live at `~/projects/atlas-migration/`.
-```
-
-This keeps memory short and navigational while the real work stays in files that can be opened, grepped, edited, and versioned separately. The memory file is the breadcrumb; the project folder is the workspace.
-
-### Treat memory as a living document, not an archive
-
-Memory isn't write-once. A memory that was true six months ago may be actively wrong today. Build the habit of updating or removing memories when:
-
-- A project finishes: move the memory into an `archive/` directory, or just delete it (git keeps the history)
-- A decision reverses: update the existing memory, don't add a second one that contradicts the first
-- A tool, path, or vendor changes: update every pointer that references the old one
-- You notice a memory has been stale the last few times Claude referenced it: either fix it or delete it
-
-Claude Code's shipped instructions already include "memories can become stale; verify before acting," but the user side of that lifecycle is on you. Nothing in the tooling reminds you to prune, and accumulated stale memory is how a persistent system quietly turns into misinformation.
-
-### Proactive memory: shape future behavior, don't just record the past
-
-Most memory is reactive: Claude reads it when it happens to need context. But some memories exist specifically to make Claude flag things *before* you ask: upcoming deadlines, capacity thresholds, decisions waiting on input, recurring blind spots you want watched.
-
-```markdown
----
-name: Things I want flagged unprompted
-description: Proactive monitoring list. Claude scans this and surfaces relevant items.
-type: project
----
-
-Track anything time-sensitive or threshold-based here.
-
-**Why:** If nothing reminds me, I'll miss it. Claude has enough context to surface these during any session that touches the relevant domain.
-**How to apply:** On sessions touching the relevant area, scan this file and flag anything within a 30-day window or near its threshold.
-```
-
-Paired with a collaboration memory that says "flag approaching deadlines without being asked," this turns memory into something Claude actively checks against rather than just looks up when prompted.
-
-### Hostname-aware shared docs
-
-Once you have more than one machine on the hive-mind, you can use shared docs with per-machine sections, where each machine reads "its own" subsection as a to-do list.
-
-A single file in your shared-identity repo has subsections keyed by hostname:
-
-```markdown
-## Captures pending. Run on the relevant machine
-
-### Pending on <machine-A>
-[runnable command block]
-
-### Pending on <machine-B>
-[runnable command block]
-```
-
-When a Claude Code session opens on machine-A, you can ask: "what's pending for this machine?" Claude reads the file, matches its `hostname` to the right subsection, runs the commands, and proposes the captured state as a diff to apply. The subsection gets struck out when done.
-
-Why this beats per-machine TODO files:
-- The doc is the single source of truth across every machine (each machine sees the full list but only acts on its own row).
-- New homework added on any machine shows up on every other machine after the next pull.
-- Resolved homework is removed in one place. No risk of stale to-dos lingering across machines.
-
-Use this when you have machine-specific captures (hardware/OS confirmation, local config snapshots, environment variable inventories) that you want a future-you on the right machine to surface unprompted.
-
 ## Limitations
 
 - **No mid-session sync.** If you're on Machine A and Machine B writes a memory simultaneously, Machine A won't see it until the next session. This is fine; you're not on two machines in the same conversation.
@@ -657,7 +675,7 @@ Git gives you history, attribution, conflict resolution, and selective access (d
 
 **Why not one big repo?**
 
-Security boundaries. If your work repo has API keys and internal IPs, you don't want it cloned on every machine. Domain scoping lets you control what lives where.
+One big repo is fine — the Quickstart uses exactly that. Split when contexts shouldn't mix: if your work repo has API keys and internal IPs, you don't want it cloned on every machine. Domain scoping lets you control what lives where.
 
 **Why private repos?**
 
