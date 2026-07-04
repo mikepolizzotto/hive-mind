@@ -43,7 +43,7 @@ If you ever find this framework and the native prompt giving conflicting guidanc
 
 ## Quickstart
 
-If you just want two machines sharing one memory repo, with no access boundaries between them, this is the minimum viable setup. Skip the full architecture below until you need it.
+Two machines sharing one memory repo is the smallest hive-mind, and a perfectly good permanent one. Start here; the rest of the README is what to reach for when your setup outgrows it.
 
 **Once, from any machine:**
 
@@ -84,7 +84,7 @@ separate .md files. After writing, commit and push with a
 }
 ```
 
-That's it. Each machine pulls when a session starts and pushes memories Claude writes. Read on for security boundaries, multi-domain setups, headless machines, and the full pattern. Graduate to those when the simple path hits a limit.
+That's it. Each machine pulls when a session starts and pushes memories Claude writes — the learn/write/share/recall loop is now running. Read on when you want more: splitting memory into multiple repos, security boundaries between machines, headless machines, and patterns for keeping memory useful as it grows.
 
 ## Architecture
 
